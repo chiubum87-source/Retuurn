@@ -1,0 +1,139 @@
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local Players = game:GetService("Players")
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+-- === CẤU HÌNH TỌA ĐỘ ===
+local POS_1 = Vector3.new(915.41, 3527.67, -606.27) -- Farm 1 (Ảnh cũ)
+local POS_2 = Vector3.new(2937.776, -45.287, 1875.713) -- Farm 2 (Mới)
+
+-- === TẠO GIAO DIỆN (GUI) ===
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FarmControlV3"
+ScreenGui.Parent = PlayerGui
+ScreenGui.ResetOnSpawn = false
+
+-- Khung chính
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 160, 0, 170) -- Thu hẹp thêm một chút cho gọn
+MainFrame.Position = UDim2.new(1, -180, 0.5, -85)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true 
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.Parent = MainFrame
+
+-- Tiêu đề
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.Text = "FARM MENU"
+Title.TextColor3 = Color3.fromRGB(255, 215, 0) -- Màu vàng Gold cho nổi
+Title.BackgroundTransparency = 1
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 12
+Title.Parent = MainFrame
+
+-- Nút Thu Nhỏ
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0, 30, 0, 30)
+ToggleBtn.Position = UDim2.new(1, -30, 0, 0)
+ToggleBtn.Text = "−"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.BackgroundTransparency = 1
+ToggleBtn.TextSize = 18
+ToggleBtn.Parent = MainFrame
+
+-- Container chứa các nút
+local ButtonContainer = Instance.new("Frame")
+ButtonContainer.Size = UDim2.new(1, 0, 1, -35)
+ButtonContainer.Position = UDim2.new(0, 0, 0, 35)
+ButtonContainer.BackgroundTransparency = 1
+ButtonContainer.Parent = MainFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.Parent = ButtonContainer
+UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+UIListLayout.Padding = UDim.new(0, 6)
+
+-- Hàm tạo nút
+local function CreateButton(text, color)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 140, 0, 35)
+    btn.Text = text
+    btn.BackgroundColor3 = color
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamSemibold
+    btn.TextSize = 12
+    btn.AutoButtonColor = true
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = btn
+    
+    btn.Parent = ButtonContainer
+    return btn
+end
+
+local TeleBtn1 = CreateButton("TELE FARM 1", Color3.fromRGB(39, 174, 96))
+local TeleBtn2 = CreateButton("TELE FARM 2", Color3.fromRGB(142, 68, 173))
+local HopBtn = CreateButton("SERVER HOP", Color3.fromRGB(41, 128, 185))
+
+-- === CHỨC NĂNG ===
+
+TeleBtn1.MouseButton1Click:Connect(function()
+    if Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
+        Player.Character.HumanoidRootPart.CFrame = CFrame.new(POS_1)
+    end
+end)
+
+TeleBtn2.MouseButton1Click:Connect(function()
+    if Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
+        Player.Character.HumanoidRootPart.CFrame = CFrame.new(POS_2)
+    end
+end)
+
+HopBtn.MouseButton1Click:Connect(function()
+    local PlaceId = game.PlaceId
+    local JobId = game.JobId
+    local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+    
+    HopBtn.Text = "SEARCHING..."
+    local success, result = pcall(function()
+        return HttpService:JSONDecode(game:HttpGet(url))
+    end)
+
+    if success and result and result.data then
+        for _, server in ipairs(result.data) do
+            if server.playing < server.maxPlayers and server.id ~= JobId then
+                TeleportService:TeleportToPlaceInstance(PlaceId, server.id, Player)
+                return
+            end
+        end
+    end
+    HopBtn.Text = "RETRY!"
+    task.wait(1)
+    HopBtn.Text = "SERVER HOP"
+end)
+
+-- Thu nhỏ
+local isMinimized = false
+ToggleBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    if isMinimized then
+        MainFrame:TweenSize(UDim2.new(0, 160, 0, 30), "Out", "Quart", 0.3, true)
+        ButtonContainer.Visible = false
+        ToggleBtn.Text = "+"
+    else
+        MainFrame:TweenSize(UDim2.new(0, 160, 0, 170), "Out", "Quart", 0.3, true)
+        ButtonContainer.Visible = true
+        ToggleBtn.Text = "−"
+    end
+end)
