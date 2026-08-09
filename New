@@ -1,0 +1,803 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "MMORPG Advanced Farm - Anti-Ban Stealth Edition",
+    LoadingTitle = "MMORPG Auto Farm",
+    LoadingSubtitle = "Stealth Bypass & Anti-Cheat Protection",
+    ConfigurationSaving = { Enabled = false },
+    Discord = { Enabled = false },
+    KeySystem = false
+})
+
+-- Tạo Tabs
+local MainTab = Window:CreateTab("Auto Farm", 4483362458)
+local PlayerTab = Window:CreateTab("Player", 4483362458)
+local AntiCheatTab = Window:CreateTab("Bypass & Protection", 4483362458)
+
+-- Services & Variables
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local VirtualUser = game:GetService("VirtualUser")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Remote Events (Sử dụng pcall/WaitForChild an toàn)
+local Remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+local CombatRemotes = Remotes and Remotes:WaitForChild("Combat", 5)
+local InventoryRemotes = Remotes and Remotes:WaitForChild("Inventory", 5)
+
+local GroundSlamEvent = CombatRemotes and CombatRemotes:WaitForChild("RequestGroundSlam", 5)
+local PickupEvent = InventoryRemotes and InventoryRemotes:WaitForChild("RequestPickupItem", 5)
+local RespawnEvent = CombatRemotes and CombatRemotes:WaitForChild("RequestRespawn", 5)
+local WorldItems = Workspace:WaitForChild("WorldItems", 5)
+
+local Config = {
+    -- Farm Configs
+    Range = 1000,
+    Height = 10,
+    BelowDepth = 10,
+    BehindDistance = 5,
+    MovementMethod = "Tween", -- Mặc định dùng Tween để an toàn hơn Teleport
+    TweenSpeed = 250,
+    FarmWalkSpeed = 24,
+    PositionMode = "Above",
+    SelectedMobBaseName = nil,
+    SelectedWeapon = "Fist",
+    AutoFarm = false,
+    AutoAttack = true,
+    UseGroundSlamRemote = true,
+    FarmDelay = 0,
+    
+    -- Attack Aura Configs
+    EnableAttackAura = false,
+    AuraRange = 25,
+
+    -- Auto Pickup Configs
+    AutoPickup = false,
+    PickupRange = 20,
+    PickupDelay = 0.15,
+
+    -- Player Configs
+    WalkSpeed = 16,
+    JumpPower = 50,
+    EnablePlayerStats = false,
+    AutoReexecute = false,
+    AutoRespawn = true,
+
+    -- Stealth Anti-Cheat Bypass Configs
+    EnableNoclip = true,
+    BypassVelocity = true,
+    RandomOffset = true,
+    SafeAttackDelay = 0.3,
+    BlockFlaggedRemotes = true,
+    AntiStun = true
+}
+
+local isPickingUp = false
+
+-- ==================== HOOKMETAMETHOD ANTI-BAN ====================
+-- Lọc và chặn các Remote nghi vấn dùng để phát hiện Hack/Speed/Teleport
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+    local args = {...}
+    
+    if Config.BlockFlaggedRemotes and not checkcaller() then
+        if method == "FireServer" or method == "InvokeServer" then
+            local remoteName = string.lower(self.Name)
+            if remoteName:find("cheat") or remoteName:find("ban") or remoteName:find("detect") or remoteName:find("flag") or remoteName:find("check") then
+                return nil -- Chặn Remote báo cáo Hack về Server
+            end
+        end
+    end
+    return oldNamecall(self, ...)
+end)
+
+-- ==================== TAB ANTI-CHEAT BYPASS ====================
+
+AntiCheatTab:CreateToggle({
+    Name = "🛡️ Chặn Remote Detect (Block Flagged Remotes)",
+    CurrentValue = true,
+    Flag = "BlockRemotesToggle",
+    Callback = function(Value)
+        Config.BlockFlaggedRemotes = Value
+    end,
+})
+
+AntiCheatTab:CreateToggle({
+    Name = "👻 Enable Noclip (Đi xuyên vật thể an toàn)",
+    CurrentValue = true,
+    Flag = "EnableNoclipToggle",
+    Callback = function(Value)
+        Config.EnableNoclip = Value
+    end,
+})
+
+AntiCheatTab:CreateToggle({
+    Name = "⚡ Bypass Velocity & Fall Damage Check",
+    CurrentValue = true,
+    Flag = "BypassVelocityToggle",
+    Callback = function(Value)
+        Config.BypassVelocity = Value
+    end,
+})
+
+AntiCheatTab:CreateToggle({
+    Name = "🎲 Dynamic Position Jitter (Tạo độ lệch tọa độ giả lập)",
+    CurrentValue = true,
+    Flag = "RandomOffsetToggle",
+    Callback = function(Value)
+        Config.RandomOffset = Value
+    end,
+})
+
+AntiCheatTab:CreateSlider({
+    Name = "⏱️ Safe Attack Delay (Độ trễ an toàn chống Server Spam Check)",
+    Range = {0.15, 1.0},
+    Increment = 0.05,
+    Suffix = " giây",
+    CurrentValue = 0.3,
+    Flag = "SafeAttackDelaySlider",
+    Callback = function(Value)
+        Config.SafeAttackDelay = Value
+    end,
+})
+
+-- Xử lý Noclip & Bypass Physics/Velocity an toàn
+RunService.Stepped:Connect(function()
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    if Config.EnableNoclip and Config.AutoFarm and Config.MovementMethod ~= "Walk" then
+        for _, part in pairs(char:GetChildren()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+
+    if Config.BypassVelocity and Config.AutoFarm then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hrp then
+            hrp.Velocity = Vector3.new(0, 0, 0)
+            hrp.RotVelocity = Vector3.new(0, 0, 0)
+        end
+        if hum then
+            -- Sử dụng Freefall/Running thay vì RunningNoPhysics để tránh flag
+            hum:ChangeState(Enum.HumanoidStateType.Freefall)
+        end
+    end
+end)
+
+-- ==================== HÀM KÍCH HOẠT NÚT TẤN CÔNG UI ====================
+local function AutoClickAttackUI()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not playerGui then return end
+    
+    for _, btn in pairs(playerGui:GetDescendants()) do
+        if btn:IsA("ImageButton") or btn:IsA("TextButton") then
+            local name = string.lower(btn.Name)
+            if name:find("attack") or name:find("strike") or name:find("sword") or name:find("hit") or name:find("atk") or name:find("btn") then
+                if firesignal then
+                    firesignal(btn.MouseButton1Down)
+                    firesignal(btn.MouseButton1Click)
+                    firesignal(btn.Activated)
+                elseif getconnections then
+                    for _, conn in pairs(getconnections(btn.MouseButton1Click)) do
+                        conn:Fire()
+                    end
+                    for _, conn in pairs(getconnections(btn.Activated)) do
+                        conn:Fire()
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ==================== QUÉT VŨ KHÍ ====================
+local function ScanWeapons()
+    local weaponList = {"Fist"}
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if backpack then
+        for _, tool in pairs(backpack:GetChildren()) do
+            if tool:IsA("Tool") and not table.find(weaponList, tool.Name) then
+                table.insert(weaponList, tool.Name)
+            end
+        end
+    end
+    
+    local char = LocalPlayer.Character
+    if char then
+        for _, tool in pairs(char:GetChildren()) do
+            if tool:IsA("Tool") and not table.find(weaponList, tool.Name) then
+                table.insert(weaponList, tool.Name)
+            end
+        end
+    end
+    return weaponList
+end
+
+-- ==================== TAB PLAYER ====================
+
+PlayerTab:CreateToggle({
+    Name = "💀 Auto Respawn (Tự động hồi sinh khi chết)",
+    CurrentValue = true,
+    Flag = "AutoRespawnToggle",
+    Callback = function(Value)
+        Config.AutoRespawn = Value
+    end,
+})
+
+PlayerTab:CreateToggle({
+    Name = "🔄 Auto Re-execute (Tự bật lại khi đổi Map)",
+    CurrentValue = false,
+    Flag = "AutoReexecuteToggle",
+    Callback = function(Value)
+        Config.AutoReexecute = Value
+    end,
+})
+
+PlayerTab:CreateToggle({
+    Name = "⚡ Bật Tùy chỉnh Speed / Jump",
+    CurrentValue = false,
+    Flag = "EnablePlayerStatsToggle",
+    Callback = function(Value)
+        Config.EnablePlayerStats = Value
+    end,
+})
+
+PlayerTab:CreateSlider({
+    Name = "🏃 Tốc độ chạy (WalkSpeed)",
+    Range = {16, 200},
+    Increment = 2,
+    Suffix = " Speed",
+    CurrentValue = 16,
+    Flag = "WalkSpeedSlider",
+    Callback = function(Value)
+        Config.WalkSpeed = Value
+    end,
+})
+
+PlayerTab:CreateSlider({
+    Name = "🦘 Độ cao nhảy (JumpPower)",
+    Range = {50, 200},
+    Increment = 5,
+    Suffix = " Power",
+    CurrentValue = 50,
+    Flag = "JumpPowerSlider",
+    Callback = function(Value)
+        Config.JumpPower = Value
+    end,
+})
+
+-- LOGIC AUTO RESPAWN
+local function SetupRespawnListener(character)
+    if not character then return end
+    local hum = character:WaitForChild("Humanoid", 5)
+    if hum then
+        hum.Died:Connect(function()
+            if Config.AutoRespawn and RespawnEvent then
+                task.wait(0.5)
+                pcall(function()
+                    RespawnEvent:FireServer()
+                end)
+            end
+        end)
+    end
+end
+
+if LocalPlayer.Character then
+    SetupRespawnListener(LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(SetupRespawnListener)
+
+-- Auto Re-execute Logic
+local queueOnTeleport = (syn and syn.queue_on_teleport) or queue_on_teleport or (fluxus and fluxus.queue_on_teleport)
+LocalPlayer.OnTeleport:Connect(function()
+    if Config.AutoReexecute and queueOnTeleport then
+        local scriptUrl = "https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"
+        queueOnTeleport([[
+            repeat task.wait() until game:IsLoaded()
+            loadstring(game:HttpGet(']] .. scriptUrl .. [['))()
+        ]])
+    end
+end)
+
+-- Loop Speed & Jump
+RunService.Stepped:Connect(function()
+    if Config.EnablePlayerStats and Config.MovementMethod ~= "Walk" then
+        local char = LocalPlayer.Character
+        if char and char:FindFirstChildOfClass("Humanoid") then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            hum.WalkSpeed = Config.WalkSpeed
+            if hum.UseJumpPower then
+                hum.JumpPower = Config.JumpPower
+            else
+                hum.JumpHeight = Config.JumpPower / 5
+            end
+        end
+    end
+end)
+
+-- ==================== TAB AUTO FARM ====================
+
+local function GetBaseName(fullName)
+    local baseName = string.match(fullName, "^(.-)_%d+$")
+    return baseName or fullName
+end
+
+local function GetNearbyMMORPGMobs()
+    local mobBaseNames = {}
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return mobBaseNames end
+
+    local hrp = char.HumanoidRootPart
+
+    for _, v in pairs(Workspace:GetDescendants()) do
+        if v:IsA("Model") and v ~= char then
+            local hum = v:FindFirstChildOfClass("Humanoid")
+            local mHrp = v:FindFirstChild("HumanoidRootPart") or v.PrimaryPart or v:FindFirstChild("Torso")
+            
+            if hum and mHrp and hum.Health > 0 and not Players:GetPlayerFromCharacter(v) then
+                local dist = (mHrp.Position - hrp.Position).Magnitude
+                if dist <= Config.Range then
+                    local cleanName = GetBaseName(v.Name)
+                    if not table.find(mobBaseNames, cleanName) then
+                        table.insert(mobBaseNames, cleanName)
+                    end
+                end
+            end
+        end
+    end
+    return mobBaseNames
+end
+
+local MobDropdown
+local WeaponDropdown
+
+MainTab:CreateButton({
+    Name = "🔄 Quét Quái & Vũ Khí (Full Scan)",
+    Callback = function()
+        local updatedMobs = GetNearbyMMORPGMobs()
+        if #updatedMobs == 0 then updatedMobs = {"❌ Không thấy Quái"} end
+        MobDropdown:Refresh(updatedMobs, true)
+        
+        local updatedWeapons = ScanWeapons()
+        WeaponDropdown:Refresh(updatedWeapons, true)
+
+        Rayfield:Notify({
+            Title = "Quét Hoàn Tất",
+            Content = "Đã cập nhật danh sách Quái và Vũ khí!",
+            Duration = 3,
+            Image = 4483362458,
+        })
+    end,
+})
+
+MobDropdown = MainTab:CreateDropdown({
+    Name = "🎯 Chọn Loại Quái để Farm",
+    Options = {"Nhấn 'Quét Quái & Vũ Khí' ở trên"},
+    CurrentOption = {""},
+    MultipleOptions = false,
+    Flag = "MobDropdown",
+    Callback = function(Option)
+        Config.SelectedMobBaseName = Option[1]
+    end,
+})
+
+WeaponDropdown = MainTab:CreateDropdown({
+    Name = "⚔️ Chọn Vũ Khí (GroundSlam Weapon)",
+    Options = {"Fist"},
+    CurrentOption = {"Fist"},
+    MultipleOptions = false,
+    Flag = "WeaponDropdown",
+    Callback = function(Option)
+        Config.SelectedWeapon = Option[1]
+    end,
+})
+
+-- SECTION: AUTO PICKUP
+MainTab:CreateToggle({
+    Name = "📦 Bật Auto Pick Up Item (Tự nhặt đồ)",
+    CurrentValue = false,
+    Flag = "AutoPickupToggle",
+    Callback = function(Value)
+        Config.AutoPickup = Value
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "📏 Phạm vi Pick Up (Pickup Distance)",
+    Range = {1, 50},
+    Increment = 1,
+    Suffix = " Studs",
+    CurrentValue = 20,
+    Flag = "PickupRangeSlider",
+    Callback = function(Value)
+        Config.PickupRange = Value
+    end,
+})
+
+-- SECTION: ATTACK AURA
+MainTab:CreateToggle({
+    Name = "⚔️ Bật Attack Aura (Tự đánh quái xung quanh)",
+    CurrentValue = false,
+    Flag = "AttackAuraToggle",
+    Callback = function(Value)
+        Config.EnableAttackAura = Value
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "🎯 Phạm vi Attack Aura (Aura Distance)",
+    Range = {5, 100},
+    Increment = 1,
+    Suffix = " Studs",
+    CurrentValue = 25,
+    Flag = "AuraRangeSlider",
+    Callback = function(Value)
+        Config.AuraRange = Value
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "💥 Bật Chiêu GroundSlam Remote",
+    CurrentValue = true,
+    Flag = "GroundSlamToggle",
+    Callback = function(Value)
+        Config.UseGroundSlamRemote = Value
+    end,
+})
+
+MainTab:CreateDropdown({
+    Name = "📍 Vị trí áp sát (Position Mode)",
+    Options = {"Above (Trên đầu)", "Below (Dưới chân)", "Behind (Sau lưng)"},
+    CurrentOption = {"Above (Trên đầu)"},
+    MultipleOptions = false,
+    Flag = "PositionModeDropdown",
+    Callback = function(Option)
+        if Option[1] == "Above (Trên đầu)" then
+            Config.PositionMode = "Above"
+        elseif Option[1] == "Below (Dưới chân)" then
+            Config.PositionMode = "Below"
+        elseif Option[1] == "Behind (Sau lưng)" then
+            Config.PositionMode = "Behind"
+        end
+    end,
+})
+
+MainTab:CreateDropdown({
+    Name = "🚶 Phương thức Di chuyển (Movement Method)",
+    Options = {"Tween (Khuyên dùng - An toàn)", "Teleport (Tức thời)", "Walk (Chạy bộ an toàn)"},
+    CurrentOption = {"Tween (Khuyên dùng - An toàn)"},
+    MultipleOptions = false,
+    Flag = "MovementMethodDropdown",
+    Callback = function(Option)
+        if Option[1]:find("Teleport") then
+            Config.MovementMethod = "Teleport"
+        elseif Option[1]:find("Tween") then
+            Config.MovementMethod = "Tween"
+        elseif Option[1]:find("Walk") then
+            Config.MovementMethod = "Walk"
+        end
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "🏃 Tốc độ Đi bộ Farm (WalkSpeed khi Farm)",
+    Range = {16, 150},
+    Increment = 2,
+    Suffix = " Speed",
+    CurrentValue = 24,
+    Flag = "FarmWalkSpeedSlider",
+    Callback = function(Value)
+        Config.FarmWalkSpeed = Value
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "💨 Tốc độ bay Tween",
+    Range = {5, 1000},
+    Increment = 25,
+    Suffix = " Studs/s",
+    CurrentValue = 250,
+    Flag = "TweenSpeedSlider",
+    Callback = function(Value)
+        Config.TweenSpeed = Value
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "📡 Bán kính quét (Studs)",
+    Range = {300, 5000},
+    Increment = 100,
+    Suffix = " Studs",
+    CurrentValue = 1000,
+    Flag = "RangeSlider",
+    Callback = function(Value)
+        Config.Range = Value
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "📏 Độ cao Above (Height)",
+    Range = {2, 30},
+    Increment = 1,
+    Suffix = " Studs",
+    CurrentValue = 15,
+    Flag = "HeightSlider",
+    Callback = function(Value)
+        Config.Height = Value
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "👇 Độ sâu Below (Below Depth)",
+    Range = {2, 30},
+    Increment = 1,
+    Suffix = " Studs",
+    CurrentValue = 10,
+    Flag = "BelowDepthSlider",
+    Callback = function(Value)
+        Config.BelowDepth = Value
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "🗡️ Khoảng cách Sau lưng (Behind Distance)",
+    Range = {2, 15},
+    Increment = 1,
+    Suffix = " Studs",
+    CurrentValue = 5,
+    Flag = "BehindSlider",
+    Callback = function(Value)
+        Config.BehindDistance = Value
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "⏳ Delay Farm (Tạm dừng nghỉ ngơi)",
+    Range = {0, 20},
+    Increment = 1,
+    Suffix = " giây",
+    CurrentValue = 0,
+    Flag = "FarmDelaySlider",
+    Callback = function(Value)
+        Config.FarmDelay = Value
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "⚡ Bật Auto Farm",
+    CurrentValue = false,
+    Flag = "AutoFarmToggle",
+    Callback = function(Value)
+        Config.AutoFarm = Value
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "⚔️ Tự động Tấn công / Click Nút Kiếm UI",
+    CurrentValue = true,
+    Flag = "AutoAttackToggle",
+    Callback = function(Value)
+        Config.AutoAttack = Value
+    end,
+})
+
+-- Anti-AFK Bằng VirtualUser An toàn
+LocalPlayer.Idled:Connect(function()
+    VirtualUser:Button2Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    VirtualUser:Button2Up(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
+end)
+
+-- LOGIC AUTO PICKUP
+task.spawn(function()
+    while true do
+        if Config.AutoPickup and WorldItems and PickupEvent then
+            pcall(function()
+                local char = LocalPlayer.Character
+                if char and char:FindFirstChild("HumanoidRootPart") then
+                    local myPos = char.HumanoidRootPart.Position
+                    local itemsToPickup = {}
+
+                    for _, item in ipairs(WorldItems:GetChildren()) do
+                        local itemPos = nil
+                        if item:IsA("BasePart") then
+                            itemPos = item.Position
+                        elseif item:IsA("Model") then
+                            itemPos = item:GetPivot().Position
+                        end
+
+                        if itemPos then
+                            local dist = (myPos - itemPos).Magnitude
+                            if dist <= Config.PickupRange then
+                                table.insert(itemsToPickup, item)
+                            end
+                        else
+                            table.insert(itemsToPickup, item)
+                        end
+                    end
+
+                    if #itemsToPickup > 0 then
+                        isPickingUp = true
+                        for _, item in ipairs(itemsToPickup) do
+                            if not Config.AutoPickup then break end
+                            PickupEvent:FireServer({ pickupId = item.Name })
+                            task.wait(Config.PickupDelay + (math.random(1, 5) / 100)) -- Thêm delay ngẫu nhiên nhỏ
+                        end
+                        isPickingUp = false
+                    end
+                end
+            end)
+        else
+            isPickingUp = false
+        end
+        task.wait(0.2)
+    end
+end)
+
+-- Main Loop Farm & Attack Aura
+local currentTween = nil
+local lastAttackTime = 0
+local lastAuraAttackTime = 0
+
+-- LOGIC XỬ LÝ ATTACK AURA NGẦM
+task.spawn(function()
+    while true do
+        if Config.EnableAttackAura then
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                local hrp = char.HumanoidRootPart
+                
+                for _, v in pairs(Workspace:GetDescendants()) do
+                    if v:IsA("Model") and v ~= char then
+                        local mHum = v:FindFirstChildOfClass("Humanoid")
+                        local mHrp = v:FindFirstChild("HumanoidRootPart") or v.PrimaryPart or v:FindFirstChild("Torso")
+                        
+                        if mHum and mHrp and mHum.Health > 0 and not Players:GetPlayerFromCharacter(v) then
+                            local dist = (mHrp.Position - hrp.Position).Magnitude
+                            if dist <= Config.AuraRange then
+                                local dynamicDelay = Config.SafeAttackDelay + (math.random(-2, 3) / 100) -- Randomized Attack Rate
+                                if (tick() - lastAuraAttackTime) >= dynamicDelay then
+                                    lastAuraAttackTime = tick()
+
+                                    if Config.UseGroundSlamRemote and GroundSlamEvent then
+                                        GroundSlamEvent:FireServer(mHrp.Position, Config.SelectedWeapon, 0)
+                                    end
+
+                                    if Config.AutoAttack then
+                                        AutoClickAttackUI()
+                                        local tool = char:FindFirstChildOfClass("Tool")
+                                        if tool then
+                                            tool:Activate()
+                                        end
+                                        VirtualUser:CaptureController()
+                                        VirtualUser:ClickButton1(Vector2.new(500, 500))
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        task.wait(Config.SafeAttackDelay)
+    end
+end)
+
+-- MAIN FARM LOOP
+RunService.Heartbeat:Connect(function()
+    if isPickingUp then return end
+
+    if Config.AutoFarm and Config.SelectedMobBaseName and not string.find(Config.SelectedMobBaseName, "Không") then
+        local char = LocalPlayer.Character
+        if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then return end
+
+        local targetMob = nil
+        local shortestDist = math.huge
+
+        for _, v in pairs(Workspace:GetDescendants()) do
+            if v:IsA("Model") and v ~= char then
+                if GetBaseName(v.Name) == Config.SelectedMobBaseName then
+                    local mHum = v:FindFirstChildOfClass("Humanoid")
+                    local mHrp = v:FindFirstChild("HumanoidRootPart") or v.PrimaryPart or v:FindFirstChild("Torso")
+                    
+                    if mHum and mHrp and mHum.Health > 0 and not Players:GetPlayerFromCharacter(v) then
+                        local dist = (mHrp.Position - char.HumanoidRootPart.Position).Magnitude
+                        if dist < shortestDist then
+                            shortestDist = dist
+                            targetMob = v
+                        end
+                    end
+                end
+            end
+        end
+
+        if targetMob then
+            local mHrp = targetMob:FindFirstChild("HumanoidRootPart") or targetMob.PrimaryPart or targetMob:FindFirstChild("Torso")
+            if mHrp then
+                local hrp = char.HumanoidRootPart
+                
+                -- Random Position Offset (Chống soi Tọa độ cố định)
+                local offsetX = Config.RandomOffset and (math.random(-25, 25) / 10) or 0
+                local offsetZ = Config.RandomOffset and (math.random(-25, 25) / 10) or 0
+                
+                local targetCFrame
+                if Config.PositionMode == "Above" then
+                    targetCFrame = mHrp.CFrame * CFrame.new(offsetX, Config.Height, offsetZ) * CFrame.Angles(math.rad(-90), 0, 0)
+                elseif Config.PositionMode == "Below" then
+                    targetCFrame = mHrp.CFrame * CFrame.new(offsetX, -Config.BelowDepth, offsetZ) * CFrame.Angles(math.rad(90), 0, 0)
+                elseif Config.PositionMode == "Behind" then
+                    targetCFrame = mHrp.CFrame * CFrame.new(offsetX, 0, Config.BehindDistance + offsetZ)
+                end
+
+                if Config.MovementMethod == "Walk" then
+                    if currentTween then
+                        currentTween:Cancel()
+                        currentTween = nil
+                    end
+                    hum.WalkSpeed = Config.FarmWalkSpeed
+                    hum:MoveTo(targetCFrame.Position)
+
+                elseif Config.MovementMethod == "Tween" then
+                    local distance = (hrp.Position - targetCFrame.Position).Magnitude
+                    local duration = distance / Config.TweenSpeed
+
+                    if distance > 3 then
+                        if not currentTween or currentTween.PlaybackState ~= Enum.PlaybackState.Playing then
+                            local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+                            currentTween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
+                            currentTween:Play()
+                        end
+                    else
+                        hrp.CFrame = targetCFrame
+                    end
+
+                elseif Config.MovementMethod == "Teleport" then
+                    if currentTween then 
+                        currentTween:Cancel() 
+                        currentTween = nil
+                    end
+                    hrp.CFrame = targetCFrame
+                end
+
+                -- Tấn công với độ trễ biến thiên tự nhiên
+                local dynamicDelay = Config.SafeAttackDelay + (math.random(-2, 3) / 100)
+                if (tick() - lastAttackTime) >= dynamicDelay then
+                    lastAttackTime = tick()
+
+                    if Config.UseGroundSlamRemote and GroundSlamEvent then
+                        GroundSlamEvent:FireServer(mHrp.Position, Config.SelectedWeapon, 0)
+                    end
+
+                    if Config.AutoAttack then
+                        AutoClickAttackUI()
+                        local tool = char:FindFirstChildOfClass("Tool")
+                        if tool then
+                            tool:Activate()
+                        end
+                        VirtualUser:CaptureController()
+                        VirtualUser:ClickButton1(Vector2.new(500, 500))
+                    end
+
+                    if Config.FarmDelay > 0 then
+                        task.wait(Config.FarmDelay)
+                    end
+                end
+            end
+        end
+    else
+        if currentTween then
+            currentTween:Cancel()
+            currentTween = nil
+        end
+    end
+end)
